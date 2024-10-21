@@ -1,5 +1,4 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from urllib.parse import urlparse, parse_qs
 import base64
@@ -9,36 +8,27 @@ import datetime
 
 import db
 
+# Create the key table if it does not exist
 db.create_key_table()
 
 hostName = "localhost"
 serverPort = 8080
 
-private_key = rsa.generate_private_key(
-    public_exponent=65537,
-    key_size=2048,
-)
-expired_key = rsa.generate_private_key(
-    public_exponent=65537,
-    key_size=2048,
-)
+def create_key():
+    return rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+    )
 
-pem = private_key.private_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PrivateFormat.TraditionalOpenSSL,
-    encryption_algorithm=serialization.NoEncryption()
-)
-expired_pem = expired_key.private_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PrivateFormat.TraditionalOpenSSL,
-    encryption_algorithm=serialization.NoEncryption()
-)
+# Create a current key and an expired key
+current_key = create_key()
+expired_key = create_key()
 
-numbers = private_key.private_numbers()
 now = datetime.datetime.utcnow()
 later = now + datetime.timedelta(hours=1)
 
-db.save_private_key(private_key, later)
+# Save both keys to database
+db.save_private_key(current_key, later)
 db.save_private_key(expired_key, now)
 
 def int_to_base64(value):
@@ -77,6 +67,7 @@ class MyServer(BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         params = parse_qs(parsed_path.query)
         if parsed_path.path == "/auth":
+            # Get the first key that will be expired if the 'expired' param is present
             kid, key_expiration, db_key = db.get_keys('expired' in params)[0]
 
             headers = {
@@ -104,6 +95,7 @@ class MyServer(BaseHTTPRequestHandler):
             self.end_headers()
             good_keys = db.get_keys(False)
             key_list = []
+            # Get all non-expired keys
             for kid, _, db_key in good_keys:
                 db_numbers = db_key.private_numbers().public_numbers
                 key_list.append({
