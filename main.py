@@ -7,6 +7,10 @@ import json
 import jwt
 import datetime
 
+import db
+
+db.execute_query(db.KEY_TABLE_DECLARATION)
+
 hostName = "localhost"
 serverPort = 8080
 
@@ -31,7 +35,11 @@ expired_pem = expired_key.private_bytes(
 )
 
 numbers = private_key.private_numbers()
+now = datetime.datetime.utcnow()
+later = now + datetime.timedelta(hours=1)
 
+db.save_private_key(private_key, later)
+db.save_private_key(expired_key, now)
 
 def int_to_base64(value):
     """Convert an integer to a Base64URL-encoded string"""
@@ -69,17 +77,17 @@ class MyServer(BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         params = parse_qs(parsed_path.query)
         if parsed_path.path == "/auth":
+            kid, key_expiration, db_key = db.get_keys('expired' in params)[0]
+
             headers = {
-                "kid": "goodKID"
+                "kid": kid
             }
             token_payload = {
                 "user": "username",
-                "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+                "exp": key_expiration 
             }
-            if 'expired' in params:
-                headers["kid"] = "expiredKID"
-                token_payload["exp"] = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
-            encoded_jwt = jwt.encode(token_payload, pem, algorithm="RS256", headers=headers)
+            db_pem = db.make_pem(db_key)
+            encoded_jwt = jwt.encode(token_payload, db_pem, algorithm="RS256", headers=headers)
             self.send_response(200)
             self.end_headers()
             self.wfile.write(bytes(encoded_jwt, "utf-8"))
@@ -94,17 +102,20 @@ class MyServer(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.end_headers()
+            good_keys = db.get_keys(False)
+            key_list = []
+            for kid, _, db_key in good_keys:
+                db_numbers = db_key.private_numbers().public_numbers
+                key_list.append({
+                    "alg": "RSA256",
+                    "ktty": "RSA",
+                    "use": "sig",
+                    "kid": kid,
+                    "n": int_to_base64(db_numbers.n),
+                    "e": int_to_base64(db_numbers.e)
+                })
             keys = {
-                "keys": [
-                    {
-                        "alg": "RS256",
-                        "kty": "RSA",
-                        "use": "sig",
-                        "kid": "goodKID",
-                        "n": int_to_base64(numbers.public_numbers.n),
-                        "e": int_to_base64(numbers.public_numbers.e),
-                    }
-                ]
+                "keys": key_list
             }
             self.wfile.write(bytes(json.dumps(keys), "utf-8"))
             return
