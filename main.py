@@ -9,7 +9,7 @@ import datetime
 
 import db
 
-db.execute_query(db.KEY_TABLE_DECLARATION)
+db.create_key_table()
 
 hostName = "localhost"
 serverPort = 8080
@@ -80,7 +80,7 @@ class MyServer(BaseHTTPRequestHandler):
             kid, key_expiration, db_key = db.get_keys('expired' in params)[0]
 
             headers = {
-                "kid": kid
+                "kid": str(kid)
             }
             token_payload = {
                 "user": "username",

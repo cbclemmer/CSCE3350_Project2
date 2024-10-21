@@ -1,5 +1,6 @@
 import sqlite3
 import datetime
+from typing import List, Tuple
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
@@ -15,10 +16,9 @@ CREATE TABLE IF NOT EXISTS keys(
 
 connection = sqlite3.connect('totally_not_my_privateKeys.db')
 
-def execute_query(q: str):
+def create_key_table():
     cursor = connection.cursor()
-    cursor.execute(q)
-    connection.commit()
+    cursor.execute(KEY_TABLE_DECLARATION)
 
 def make_pem(key: RSAPrivateKey):
     return key.private_bytes(
@@ -32,22 +32,21 @@ def save_private_key(key: RSAPrivateKey, expiration: datetime.datetime):
     pem = make_pem(key)
     cursor = connection.cursor()
     cursor.execute("INSERT INTO keys (key, exp) VALUES (?, ?)", (pem, date_int));
-    cursor.commit()
 
-def get_keys(expired: bool) -> Tuple[int, datetime.datetime, RSAPrivateKey]:
+def get_keys(expired: bool) -> List[Tuple[int, datetime.datetime, RSAPrivateKey]]:
     cursor = connection.cursor()
     cursor.execute("SELECT * FROM keys")
     rows = cursor.fetchall()
-    now = datetime.datetime.utcnow()
+    now = int(datetime.datetime.utcnow().timestamp())
     ret_data = []
     for row in rows:
-        key_expiration = row['exp']
-        id = row['kid']
-        key_data = row['key']
-        if expired == key_expiration < now:
+        key_expiration = row[2]
+        id = row[0]
+        key_data = row[1]
+        if expired == (key_expiration < now):
             ret_data.append((
                 id,
                 datetime.datetime.utcfromtimestamp(key_expiration),
-                serialization.serialization.load_pem_private_key(key_data, backend=default_backend()
-            )))
+                serialization.load_pem_private_key(key_data, backend=default_backend(), password=None)
+            ))
     return ret_data
